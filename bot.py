@@ -1,4 +1,3 @@
-
 import os
 import sqlite3
 import datetime
@@ -14,11 +13,12 @@ from telegram.ext import (
     filters,
 )
 
+# ================== CONFIG ==================
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 DB = "subscriptions.db"
 
-# ---------- Flask dummy server ----------
+# ================== FLASK (Render FREE fix) ==================
 app = Flask(__name__)
 
 @app.route("/")
@@ -31,7 +31,7 @@ def run_flask():
 
 threading.Thread(target=run_flask, daemon=True).start()
 
-# ---------- Database ----------
+# ================== DATABASE ==================
 def db():
     return sqlite3.connect(DB)
 
@@ -49,14 +49,7 @@ def init_db():
         )
         """)
 
-def months_to_int(code):
-    return {
-        "1": 1,
-        "3": 3,
-        "6": 6,
-        "12": 12
-    }[code]
-
+# ================== HELPERS ==================
 def progress_bar(start, end):
     today = datetime.date.today()
     total = (end - start).days
@@ -67,16 +60,20 @@ def progress_bar(start, end):
     bar = "█" * filled + "░" * (10 - filled)
     return percent, bar
 
-# ---------- Bot handlers ----------
+# ================== BOT HANDLERS ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text("❌ هذا البوت خاص")
         return
-    kb = [
+
+    keyboard = [
         [InlineKeyboardButton("➕ إضافة اشتراك", callback_data="add")],
-        [InlineKeyboardButton("📋 عرض الاشتراكات", callback_data="view")],
+        [InlineKeyboardButton("📋 عرض الاشتراكات", callback_data="view")]
     ]
-    await update.message.reply_text("📦 Subscription Manager", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text(
+        "📦 إدارة الاشتراكات",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -85,16 +82,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if q.data == "add":
         context.user_data.clear()
         context.user_data["step"] = "name"
-        await q.message.reply_text("اسم الزبون؟")
+        await q.message.reply_text("👤 اسم الزبون؟")
 
     elif q.data == "view":
         with db() as con:
             rows = con.execute(
                 "SELECT id,name,service,start_date,end_date FROM subs ORDER BY end_date"
             ).fetchall()
+
         if not rows:
-            await q.message.reply_text("لا يوجد اشتراكات")
+            await q.message.reply_text("📭 لا يوجد اشتراكات")
             return
+
         msg = "📋 الاشتراكات:\n\n"
         for r in rows:
             start = datetime.date.fromisoformat(r[3])
@@ -107,31 +106,50 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await q.message.reply_text(msg)
 
-async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("step")
 
     if step == "name":
         context.user_data["name"] = update.message.text
         context.user_data["step"] = "service"
-        await update.message.reply_text("اسم الخدمة؟")
+        await update.message.reply_text("🛠 اسم الخدمة؟")
 
     elif step == "service":
         context.user_data["service"] = update.message.text
-        kb = [
+        keyboard = [
             [InlineKeyboardButton("1 شهر", callback_data="dur_1")],
             [InlineKeyboardButton("3 أشهر", callback_data="dur_3")],
             [InlineKeyboardButton("6 أشهر", callback_data="dur_6")],
             [InlineKeyboardButton("سنة", callback_data="dur_12")]
         ]
-        await update.message.reply_text("اختر مدة الاشتراك:", reply_markup=InlineKeyboardMarkup(kb))
+        await update.message.reply_text(
+            "⏱ اختر مدة الاشتراك:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         context.user_data["step"] = None
 
 async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    code = q.data.split("_")[1]
-    months = months_to_int(code)
+    data = q.data.replace("dur_", "").strip()
+
+    mapping = {
+        "1": 1,
+        "3": 3,
+        "6": 6,
+        "12": 12,
+        "1 شهر": 1,
+        "3 أشهر": 3,
+        "6 أشهر": 6,
+        "سنة": 12
+    }
+
+    if data not in mapping:
+        await q.message.reply_text("❌ خطأ في اختيار المدة، أعد المحاولة")
+        return
+
+    months = mapping[data]
 
     start = datetime.date.today()
     end = start + datetime.timedelta(days=30 * months)
@@ -141,8 +159,8 @@ async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         con.execute(
             "INSERT INTO subs (name,service,start_date,end_date,remind_date,chat_id) VALUES (?,?,?,?,?,?)",
             (
-                context.user_data["name"],
-                context.user_data["service"],
+                context.user_data.get("name", "غير معروف"),
+                context.user_data.get("service", "غير محدد"),
                 start.isoformat(),
                 end.isoformat(),
                 remind.isoformat(),
@@ -160,12 +178,14 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
             "SELECT name,service,chat_id FROM subs WHERE remind_date=?",
             (today,)
         ).fetchall()
+
     for r in rows:
         await context.bot.send_message(
             chat_id=r[2],
             text=f"🔔 تذكير: اشتراك {r[0]} ({r[1]}) ينتهي بعد يومين"
         )
 
+# ================== MAIN ==================
 def main():
     init_db()
     app_bot = ApplicationBuilder().token(TOKEN).build()
@@ -173,7 +193,7 @@ def main():
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
     app_bot.add_handler(CallbackQueryHandler(menu))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     app_bot.job_queue.run_daily(reminder, time=datetime.time(hour=9))
     app_bot.run_polling()
