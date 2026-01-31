@@ -18,7 +18,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 DB = "subscriptions.db"
 
-# ================== FLASK (Render FREE fix) ==================
+# ================== FLASK (Render FREE) ==================
 app = Flask(__name__)
 
 @app.route("/")
@@ -60,7 +60,7 @@ def progress_bar(start, end):
     bar = "█" * filled + "░" * (10 - filled)
     return percent, bar
 
-# ================== BOT HANDLERS ==================
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text("❌ هذا البوت خاص")
@@ -75,6 +75,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+# ================== MENU ==================
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -94,18 +95,30 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("📭 لا يوجد اشتراكات")
             return
 
-        msg = "📋 الاشتراكات:\n\n"
         for r in rows:
             start = datetime.date.fromisoformat(r[3])
             end = datetime.date.fromisoformat(r[4])
             percent, bar = progress_bar(start, end)
-            msg += (
-                f"#{r[0]} | {r[1]} – {r[2]}\n"
-                f"⏳ {r[4]}\n"
-                f"{bar} {percent}%\n\n"
-            )
-        await q.message.reply_text(msg)
 
+            msg = (
+                f"#{r[0]} | {r[1] or '—'} – {r[2] or '—'}\n"
+                f"⏳ {r[4]}\n"
+                f"{bar} {percent}%"
+            )
+
+            keyboard = [
+                [
+                    InlineKeyboardButton("✏️ تعديل", callback_data=f"edit_{r[0]}"),
+                    InlineKeyboardButton("🗑️ حذف", callback_data=f"del_{r[0]}")
+                ]
+            ]
+
+            await q.message.reply_text(
+                msg,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+# ================== TEXT HANDLER ==================
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("step")
 
@@ -128,29 +141,34 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["step"] = None
 
+    elif step == "edit_name":
+        if update.message.text != "-":
+            context.user_data["new_name"] = update.message.text
+        context.user_data["step"] = "edit_service"
+        await update.message.reply_text("🛠 اسم الخدمة الجديد؟ (أو - للتخطي)")
+
+    elif step == "edit_service":
+        if update.message.text != "-":
+            context.user_data["new_service"] = update.message.text
+
+        keyboard = [
+            [InlineKeyboardButton("1 شهر", callback_data="editdur_1")],
+            [InlineKeyboardButton("3 أشهر", callback_data="editdur_3")],
+            [InlineKeyboardButton("6 أشهر", callback_data="editdur_6")],
+            [InlineKeyboardButton("سنة", callback_data="editdur_12")]
+        ]
+        await update.message.reply_text(
+            "⏱ اختر مدة جديدة:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        context.user_data["step"] = None
+
+# ================== ADD DURATION ==================
 async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    data = q.data.replace("dur_", "").strip()
-
-    mapping = {
-        "1": 1,
-        "3": 3,
-        "6": 6,
-        "12": 12,
-        "1 شهر": 1,
-        "3 أشهر": 3,
-        "6 أشهر": 6,
-        "سنة": 12
-    }
-
-    if data not in mapping:
-        await q.message.reply_text("❌ خطأ في اختيار المدة، أعد المحاولة")
-        return
-
-    months = mapping[data]
-
+    months = int(q.data.replace("dur_", ""))
     start = datetime.date.today()
     end = start + datetime.timedelta(days=30 * months)
     remind = end - datetime.timedelta(days=2)
@@ -159,8 +177,8 @@ async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         con.execute(
             "INSERT INTO subs (name,service,start_date,end_date,remind_date,chat_id) VALUES (?,?,?,?,?,?)",
             (
-                context.user_data.get("name", "غير معروف"),
-                context.user_data.get("service", "غير محدد"),
+                context.user_data.get("name"),
+                context.user_data.get("service"),
                 start.isoformat(),
                 end.isoformat(),
                 remind.isoformat(),
@@ -168,9 +186,57 @@ async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
 
-    await q.message.reply_text(f"✅ تم حفظ الاشتراك\n⏳ ينتهي: {end}")
     context.user_data.clear()
+    await q.message.reply_text(f"✅ تم حفظ الاشتراك\n⏳ ينتهي: {end}")
 
+# ================== DELETE ==================
+async def delete_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    sub_id = q.data.split("_")[1]
+
+    with db() as con:
+        con.execute("DELETE FROM subs WHERE id=?", (sub_id,))
+
+    await q.message.reply_text("🗑️ تم حذف الاشتراك")
+
+# ================== EDIT ==================
+async def edit_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    context.user_data.clear()
+    context.user_data["edit_id"] = q.data.split("_")[1]
+    context.user_data["step"] = "edit_name"
+
+    await q.message.reply_text("✏️ اسم الزبون الجديد؟ (أو - للتخطي)")
+
+async def edit_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    months = int(q.data.replace("editdur_", ""))
+    sub_id = context.user_data["edit_id"]
+
+    start = datetime.date.today()
+    end = start + datetime.timedelta(days=30 * months)
+    remind = end - datetime.timedelta(days=2)
+
+    with db() as con:
+        if "new_name" in context.user_data:
+            con.execute("UPDATE subs SET name=? WHERE id=?", (context.user_data["new_name"], sub_id))
+        if "new_service" in context.user_data:
+            con.execute("UPDATE subs SET service=? WHERE id=?", (context.user_data["new_service"], sub_id))
+
+        con.execute(
+            "UPDATE subs SET start_date=?, end_date=?, remind_date=? WHERE id=?",
+            (start.isoformat(), end.isoformat(), remind.isoformat(), sub_id)
+        )
+
+    context.user_data.clear()
+    await q.message.reply_text("✅ تم تعديل الاشتراك")
+
+# ================== REMINDER ==================
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
     today = datetime.date.today().isoformat()
     with db() as con:
@@ -192,6 +258,9 @@ def main():
 
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
+    app_bot.add_handler(CallbackQueryHandler(edit_duration, pattern="^editdur_"))
+    app_bot.add_handler(CallbackQueryHandler(delete_sub, pattern="^del_"))
+    app_bot.add_handler(CallbackQueryHandler(edit_sub, pattern="^edit_"))
     app_bot.add_handler(CallbackQueryHandler(menu))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
