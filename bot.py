@@ -2,6 +2,8 @@
 import os
 import sqlite3
 import datetime
+import threading
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,6 +18,20 @@ TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 DB = "subscriptions.db"
 
+# ---------- Flask dummy server ----------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_flask, daemon=True).start()
+
+# ---------- Database ----------
 def db():
     return sqlite3.connect(DB)
 
@@ -46,6 +62,7 @@ def progress_bar(start, end):
     bar = "█" * filled + "░" * (10 - filled)
     return percent, bar
 
+# ---------- Bot handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text("❌ هذا البوت خاص")
@@ -54,7 +71,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("➕ Add", callback_data="add")],
         [InlineKeyboardButton("📋 View", callback_data="view")],
     ]
-    await update.message.reply_text("📦 Subscription Manager (Progress)", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text("📦 Subscription Manager", reply_markup=InlineKeyboardMarkup(kb))
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -144,15 +161,15 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_db()
-    app = ApplicationBuilder().token(TOKEN).build()
+    app_bot = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu))
-    app.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CallbackQueryHandler(menu))
+    app_bot.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
 
-    app.job_queue.run_daily(reminder, time=datetime.time(hour=9))
-    app.run_polling()
+    app_bot.job_queue.run_daily(reminder, time=datetime.time(hour=9))
+    app_bot.run_polling()
 
 if __name__ == "__main__":
     main()

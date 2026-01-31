@@ -1,12 +1,14 @@
 
-# Subscription Bot with Progress Bar
+# Telegram Subscription Bot (Render FREE)
 
-## Features
-- Visual progress bar for each subscription
-- Percentage based on time used
-- Auto reminder before 2 days
-- Owner-only
+## Deploy
+- Render Web Service (FREE)
+- Build: pip install -r requirements.txt
+- Start: python bot.py
 
-## Environment Variables
+## Env Vars
 BOT_TOKEN
 OWNER_ID
+
+## Notes
+Flask is only to keep Render alive.
