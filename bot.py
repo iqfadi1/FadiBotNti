@@ -49,8 +49,13 @@ def init_db():
         )
         """)
 
-def months_to_int(label):
-    return {"1 شهر":1,"3 أشهر":3,"6 أشهر":6,"سنة":12}[label]
+def months_to_int(code):
+    return {
+        "1": 1,
+        "3": 3,
+        "6": 6,
+        "12": 12
+    }[code]
 
 def progress_bar(start, end):
     today = datetime.date.today()
@@ -68,8 +73,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ هذا البوت خاص")
         return
     kb = [
-        [InlineKeyboardButton("➕ Add", callback_data="add")],
-        [InlineKeyboardButton("📋 View", callback_data="view")],
+        [InlineKeyboardButton("➕ إضافة اشتراك", callback_data="add")],
+        [InlineKeyboardButton("📋 عرض الاشتراكات", callback_data="view")],
     ]
     await update.message.reply_text("📦 Subscription Manager", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -113,21 +118,23 @@ async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif step == "service":
         context.user_data["service"] = update.message.text
         kb = [
-            [InlineKeyboardButton("1 شهر", callback_data="dur_1 شهر")],
-            [InlineKeyboardButton("3 أشهر", callback_data="dur_3 أشهر")],
-            [InlineKeyboardButton("6 أشهر", callback_data="dur_6 أشهر")],
-            [InlineKeyboardButton("سنة", callback_data="dur_سنة")]
+            [InlineKeyboardButton("1 شهر", callback_data="dur_1")],
+            [InlineKeyboardButton("3 أشهر", callback_data="dur_3")],
+            [InlineKeyboardButton("6 أشهر", callback_data="dur_6")],
+            [InlineKeyboardButton("سنة", callback_data="dur_12")]
         ]
-        await update.message.reply_text("المدة؟", reply_markup=InlineKeyboardMarkup(kb))
+        await update.message.reply_text("اختر مدة الاشتراك:", reply_markup=InlineKeyboardMarkup(kb))
         context.user_data["step"] = None
 
 async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    months = months_to_int(q.data.replace("dur_",""))
+    code = q.data.split("_")[1]
+    months = months_to_int(code)
+
     start = datetime.date.today()
-    end = start + datetime.timedelta(days=30*months)
+    end = start + datetime.timedelta(days=30 * months)
     remind = end - datetime.timedelta(days=2)
 
     with db() as con:
@@ -143,7 +150,7 @@ async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
 
-    await q.message.reply_text(f"✅ تم الإضافة\n⏳ ينتهي: {end}")
+    await q.message.reply_text(f"✅ تم حفظ الاشتراك\n⏳ ينتهي: {end}")
     context.user_data.clear()
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
@@ -164,8 +171,8 @@ def main():
     app_bot = ApplicationBuilder().token(TOKEN).build()
 
     app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CallbackQueryHandler(menu))
     app_bot.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
+    app_bot.add_handler(CallbackQueryHandler(menu))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
 
     app_bot.job_queue.run_daily(reminder, time=datetime.time(hour=9))
