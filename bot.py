@@ -18,7 +18,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 DB = "subscriptions.db"
 
-# ================== FLASK (Render Free Fix) ==================
+# ================== FLASK (Render Free) ==================
 app = Flask(__name__)
 
 @app.route("/")
@@ -49,15 +49,24 @@ def init_db():
         )
         """)
 
-# ================== HELPERS ==================
+# ================== PROGRESS BAR (COLORED) ==================
 def progress_bar(start, end):
     today = datetime.date.today()
     total = (end - start).days
     used = (today - start).days
     used = max(0, min(used, total))
+
     percent = int((used / total) * 100) if total else 100
-    filled = int(percent / 10)
-    bar = "█" * filled + "░" * (10 - filled)
+    blocks = int(percent / 10)
+
+    if percent >= 70:
+        block = "🟩"
+    elif percent >= 40:
+        block = "🟨"
+    else:
+        block = "🟥"
+
+    bar = block * blocks + "⬜" * (10 - blocks)
     return percent, bar
 
 # ================== START ==================
@@ -136,7 +145,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("1 Year", callback_data="dur_12")]
         ]
         await update.message.reply_text(
-            "⏱ Select subscription duration:",
+            "⏱ Select duration:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         context.user_data["step"] = None
@@ -163,7 +172,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["step"] = None
 
-# ================== ADD DURATION ==================
+# ================== ADD ==================
 async def duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -254,18 +263,18 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
 # ================== MAIN ==================
 def main():
     init_db()
-    app_bot = ApplicationBuilder().token(TOKEN).build()
+    bot = ApplicationBuilder().token(TOKEN).build()
 
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
-    app_bot.add_handler(CallbackQueryHandler(edit_duration, pattern="^editdur_"))
-    app_bot.add_handler(CallbackQueryHandler(delete_sub, pattern="^del_"))
-    app_bot.add_handler(CallbackQueryHandler(edit_sub, pattern="^edit_"))
-    app_bot.add_handler(CallbackQueryHandler(menu))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CallbackQueryHandler(duration, pattern="^dur_"))
+    bot.add_handler(CallbackQueryHandler(edit_duration, pattern="^editdur_"))
+    bot.add_handler(CallbackQueryHandler(delete_sub, pattern="^del_"))
+    bot.add_handler(CallbackQueryHandler(edit_sub, pattern="^edit_"))
+    bot.add_handler(CallbackQueryHandler(menu))
+    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    app_bot.job_queue.run_daily(reminder, time=datetime.time(hour=9))
-    app_bot.run_polling()
+    bot.job_queue.run_daily(reminder, time=datetime.time(hour=9))
+    bot.run_polling()
 
 if __name__ == "__main__":
     main()
